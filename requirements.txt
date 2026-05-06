@@ -1,0 +1,8 @@
+# Runtime cốt lõi
+# Ghim phiên bản theo hướng tương thích với Python 3.6 để bám sát Jetson Nano.
+opencv-python==4.5.5.64
+numpy==1.19.5
+PyYAML==6.0.1
+
+# Giám sát hệ thống (chuẩn bị cho benchmark CPU/RAM)
+psutil==5.9.5

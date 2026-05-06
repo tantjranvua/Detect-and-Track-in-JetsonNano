@@ -1,0 +1,5 @@
+Day 1 smoke test notes:
+- Run python -m src.app.main
+- Confirm camera window opens
+- Confirm FPS text appears
+- Press q to quit

@@ -1,0 +1,29 @@
+runtime:
+  camera_index: 0
+  width: 1280
+  height: 720
+  input_fps: 10
+  display: true
+
+detection:
+  face_conf_threshold: 0.6
+  object_conf_threshold: 0.4
+  nms_iou_threshold: 0.4
+  classes_allowlist: [cup, cell phone]
+
+tracking:
+  max_missing_frames: 15
+  selected_priority: true
+
+control:
+  deadband_px: 15
+  max_step_deg: 3
+  timeout_sec: 1.5
+  pan_pid: {kp: 0.012, ki: 0.0, kd: 0.004}
+  tilt_pid: {kp: 0.010, ki: 0.0, kd: 0.003}
+
+kpi:
+  laptop_fps_min: 10
+  jetson_fps_min: 25
+  latency_ms_max: 400
+  center_error_px_max: 200
