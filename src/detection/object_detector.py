@@ -234,4 +234,4 @@ def detect_objects(frame, conf_threshold: float, nms_threshold: float) -> List[D
 
     # A second pass helps reduce duplicated / nested boxes that still remain
     # after model.detect() NMS in noisy webcam streams.
-    return _suppress_nested_boxes(results, iou_thr=max(0.35, nms_threshold), contain_thr=0.85)
+    return _suppress_nested_boxes(results, iou_thr=max(0.35, nms_threshold), contain_thr=0.8)

@@ -45,7 +45,7 @@ def _load_model() -> Optional[cv2.dnn_Net]:
     return _net
 
 
-def detect_faces(frame, conf_threshold: float) -> List[Dict[str, Any]]:
+def detect_faces(frame, conf_threshold: float, nms_iou_threshold: float = 0.35) -> List[Dict[str, Any]]:
     """
     Hàm thực hiện nhận diện khuôn mặt từ frame hình ảnh.
     Trả về danh sách các dict chứa tọa độ box và độ tin cậy.
@@ -76,16 +76,43 @@ def detect_faces(frame, conf_threshold: float) -> List[Dict[str, Any]]:
         else:
             raise
     
-    results: List[Dict[str, Any]] = []
+    raw_boxes: List[List[int]] = []
+    raw_scores: List[float] = []
     # Bước 3: Duyệt qua các kết quả nhận diện
     for i in range(0, detections.shape[2]):
-        confidence = detections[0, 0, i, 2]
+        confidence = float(detections[0, 0, i, 2])
         if confidence > conf_threshold:
             box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
             (startX, startY, endX, endY) = box.astype("int")
-            results.append({
-                "box": (startX, startY, endX, endY),
-                "confidence": confidence
-            })
+            startX = max(0, min(w - 1, startX))
+            startY = max(0, min(h - 1, startY))
+            endX = max(0, min(w, endX))
+            endY = max(0, min(h, endY))
+
+            bw = endX - startX
+            bh = endY - startY
+            if bw <= 0 or bh <= 0:
+                continue
+
+            raw_boxes.append([startX, startY, bw, bh])
+            raw_scores.append(confidence)
+
+    results: List[Dict[str, Any]] = []
+    if not raw_boxes:
+        return results
+
+    keep_indices = cv2.dnn.NMSBoxes(raw_boxes, raw_scores, conf_threshold, nms_iou_threshold)
+    if keep_indices is None or len(keep_indices) == 0:
+        return results
+
+    flat_indices = np.array(keep_indices).reshape(-1)
+    for idx in flat_indices:
+        x, y, bw, bh = raw_boxes[int(idx)]
+        results.append(
+            {
+                "box": (x, y, x + bw, y + bh),
+                "confidence": float(raw_scores[int(idx)]),
+            }
+        )
 
     return results
