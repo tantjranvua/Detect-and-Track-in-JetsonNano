@@ -11,7 +11,7 @@ from src.detection.face_detector import detect_faces
 from src.detection.face_recognizer import build_face_recognizer
 from src.detection.object_detector import detect_objects
 from src.hardware.servo_controller import ServoController
-from src.input.camera import open_camera
+from src.input.camera import open_camera, resolve_camera_runtime
 from src.tracking.tracker import TargetTracker
 from src.utils.metrics import FpsCounter
 from src.utils.logger import get_logger
@@ -101,11 +101,16 @@ def main() -> None:
     last_target_seen_ts = last_control_ts
     last_no_target_log_ts = 0.0
 
+    camera_runtime = resolve_camera_runtime(cfg.get("runtime", {}))
     cap = open_camera(
-        index=cfg["runtime"]["camera_index"],
-        width=cfg["runtime"]["width"],
-        height=cfg["runtime"]["height"],
-        fps=cfg["runtime"]["input_fps"],
+        index=int(camera_runtime["camera_index"]),
+        width=int(camera_runtime["width"]),
+        height=int(camera_runtime["height"]),
+        fps=int(camera_runtime["input_fps"]),
+        backend=str(camera_runtime["camera_backend"]),
+        use_csi=bool(camera_runtime["camera_use_csi"]),
+        gstreamer_pipeline=str(camera_runtime["camera_gstreamer_pipeline"]),
+        flip_method=int(camera_runtime["camera_flip_method"]),
     )
 
     fps_counter = FpsCounter(window_sec=1.0)

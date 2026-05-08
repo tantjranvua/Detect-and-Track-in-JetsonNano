@@ -1,5 +1,23 @@
 runtime:
+  active_camera_profile: usb_webcam
   camera_index: 0
+  camera_backend: auto
+  camera_use_csi: false
+  camera_flip_method: 0
+  camera_gstreamer_pipeline: ""
+  camera_profiles:
+    usb_webcam:
+      camera_index: 0
+      camera_backend: v4l2
+      camera_use_csi: false
+      camera_flip_method: 0
+      camera_gstreamer_pipeline: ""
+    csi_camera:
+      camera_index: 0
+      camera_backend: gstreamer
+      camera_use_csi: true
+      camera_flip_method: 0
+      camera_gstreamer_pipeline: ""
   width: 1280
   height: 720
   input_fps: 10

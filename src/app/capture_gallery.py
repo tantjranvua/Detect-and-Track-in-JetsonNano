@@ -7,7 +7,7 @@ import cv2
 import yaml
 
 from src.detection.face_detector import detect_faces
-from src.input.camera import open_camera
+from src.input.camera import open_camera, resolve_camera_runtime
 
 
 def load_config() -> Dict[str, object]:
@@ -71,11 +71,16 @@ def main() -> None:
     person_dir = gallery_root / person_name
     person_dir.mkdir(parents=True, exist_ok=True)
 
+    camera_runtime = resolve_camera_runtime(cfg.get("runtime", {}))
     cap = open_camera(
-        index=int(cfg["runtime"]["camera_index"]),
-        width=int(cfg["runtime"]["width"]),
-        height=int(cfg["runtime"]["height"]),
-        fps=int(cfg["runtime"]["input_fps"]),
+        index=int(camera_runtime["camera_index"]),
+        width=int(camera_runtime["width"]),
+        height=int(camera_runtime["height"]),
+        fps=int(camera_runtime["input_fps"]),
+        backend=str(camera_runtime["camera_backend"]),
+        use_csi=bool(camera_runtime["camera_use_csi"]),
+        gstreamer_pipeline=str(camera_runtime["camera_gstreamer_pipeline"]),
+        flip_method=int(camera_runtime["camera_flip_method"]),
     )
 
     if not cap.isOpened():

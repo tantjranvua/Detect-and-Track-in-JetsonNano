@@ -18,6 +18,8 @@
 - Chưa tích hợp điều khiển phần cứng servo.
 - Điều khiển tạm thời ở dạng mô phỏng: hiển thị hướng quay cần thiết LEFT/RIGHT/UP/DOWN trên console hoặc overlay.
 - Bổ sung demo điều khiển camera theo tâm mục tiêu: tính sai lệch tâm khung hình và in lệnh hướng UP/DOWN/LEFT/RIGHT ra console thay cho xuất lệnh servo thật.
+- Bổ sung khả năng chay tren Jetson Nano: them script khoi dong Linux va ho tro camera CSI qua GStreamer.
+- Bo sung camera profile (usb_webcam/csi_camera) de chuyen doi nhanh bang 1 dong active_camera_profile.
 - Bổ sung giai đoạn face-recognize theo hướng on-device, không phụ thuộc dịch vụ cloud.
 - Face-recognize ưu tiên cơ chế gallery cục bộ (ảnh mẫu theo từng người), cho phép nhận diện "unknown" khi dưới ngưỡng.
 - Cần có công cụ thu thập ảnh gallery trực tiếp từ camera để tạo dữ liệu mẫu nhanh trong thực địa.
