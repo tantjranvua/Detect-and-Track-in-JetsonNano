@@ -23,6 +23,7 @@
 - Chuan hoa quy trinh Jetson Nano voi moi truong ao mac dinh P36 va bo requirements rieng cho Jetson.
 - Tuong thich OpenCV tren Jetson khi khong co DNN_BACKEND_CUDA/DNN_TARGET_CUDA: tu dong fallback CPU, tranh crash luc khoi tao model.
 - Tuong thich OpenCV 4.1.1 tren Jetson khi object model TensorFlow khong ho tro op FusedBatchNormV3: bo qua object detector de app tiep tuc chay.
+- Tuong thich loi NMSBoxes tren OpenCV 4.1.1 (SystemError: return Null): fallback sang NMS thu cong de khong crash face detector.
 - Bổ sung giai đoạn face-recognize theo hướng on-device, không phụ thuộc dịch vụ cloud.
 - Face-recognize ưu tiên cơ chế gallery cục bộ (ảnh mẫu theo từng người), cho phép nhận diện "unknown" khi dưới ngưỡng.
 - Cần có công cụ thu thập ảnh gallery trực tiếp từ camera để tạo dữ liệu mẫu nhanh trong thực địa.

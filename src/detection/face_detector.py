@@ -14,6 +14,62 @@ _warned_missing_model = False
 _using_cuda = False
 
 
+def _iou_xywh(box_a: List[int], box_b: List[int]) -> float:
+    ax, ay, aw, ah = box_a
+    bx, by, bw, bh = box_b
+    ax2, ay2 = ax + aw, ay + ah
+    bx2, by2 = bx + bw, by + bh
+
+    inter_x1 = max(ax, bx)
+    inter_y1 = max(ay, by)
+    inter_x2 = min(ax2, bx2)
+    inter_y2 = min(ay2, by2)
+
+    inter_w = max(0, inter_x2 - inter_x1)
+    inter_h = max(0, inter_y2 - inter_y1)
+    inter_area = inter_w * inter_h
+    if inter_area <= 0:
+        return 0.0
+
+    area_a = max(1, aw * ah)
+    area_b = max(1, bw * bh)
+    union = area_a + area_b - inter_area
+    return float(inter_area) / float(max(1, union))
+
+
+def _nms_fallback_indices(raw_boxes: List[List[int]], raw_scores: List[float], nms_iou_threshold: float) -> List[int]:
+    order = sorted(range(len(raw_scores)), key=lambda i: raw_scores[i], reverse=True)
+    kept: List[int] = []
+    while order:
+        current = order.pop(0)
+        kept.append(current)
+        order = [
+            idx for idx in order
+            if _iou_xywh(raw_boxes[current], raw_boxes[idx]) < float(nms_iou_threshold)
+        ]
+    return kept
+
+
+def _safe_nms_indices(
+    raw_boxes: List[List[int]],
+    raw_scores: List[float],
+    conf_threshold: float,
+    nms_iou_threshold: float,
+) -> List[int]:
+    try:
+        keep_indices = cv2.dnn.NMSBoxes(raw_boxes, raw_scores, conf_threshold, nms_iou_threshold)
+    except (cv2.error, SystemError, TypeError):
+        return _nms_fallback_indices(raw_boxes, raw_scores, nms_iou_threshold)
+
+    if keep_indices is None:
+        return []
+
+    try:
+        return [int(i) for i in np.array(keep_indices).reshape(-1)]
+    except (ValueError, TypeError):
+        return _nms_fallback_indices(raw_boxes, raw_scores, nms_iou_threshold)
+
+
 def _load_model() -> Optional[cv2.dnn_Net]:
     global _net
     global _warned_missing_model
@@ -108,12 +164,11 @@ def detect_faces(frame, conf_threshold: float, nms_iou_threshold: float = 0.35) 
     if not raw_boxes:
         return results
 
-    keep_indices = cv2.dnn.NMSBoxes(raw_boxes, raw_scores, conf_threshold, nms_iou_threshold)
-    if keep_indices is None or len(keep_indices) == 0:
+    keep_indices = _safe_nms_indices(raw_boxes, raw_scores, conf_threshold, nms_iou_threshold)
+    if len(keep_indices) == 0:
         return results
 
-    flat_indices = np.array(keep_indices).reshape(-1)
-    for idx in flat_indices:
+    for idx in keep_indices:
         x, y, bw, bh = raw_boxes[int(idx)]
         results.append(
             {
