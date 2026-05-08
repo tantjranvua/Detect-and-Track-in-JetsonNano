@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import cv2
 
@@ -195,10 +195,86 @@ def _load_model() -> Optional[cv2.dnn_Net]:
     return _net
 
 
+def _decode_tf_detections(output: Any, frame_shape: Tuple[int, int, int], conf_threshold: float) -> List[Dict[str, Any]]:
+    h, w = frame_shape[:2]
+    results: List[Dict[str, Any]] = []
+
+    if output is None or not hasattr(output, "shape"):
+        return results
+
+    # SSD TensorFlow output layout: [1, 1, N, 7]
+    # fields: [image_id, class_id, confidence, x1, y1, x2, y2]
+    if len(output.shape) != 4 or output.shape[3] < 7:
+        return results
+
+    for i in range(output.shape[2]):
+        confidence = float(output[0, 0, i, 2])
+        if confidence < float(conf_threshold):
+            continue
+
+        class_id = int(output[0, 0, i, 1])
+        if class_id not in ALLOWED_CLASS_IDS:
+            continue
+
+        x1 = int(float(output[0, 0, i, 3]) * w)
+        y1 = int(float(output[0, 0, i, 4]) * h)
+        x2 = int(float(output[0, 0, i, 5]) * w)
+        y2 = int(float(output[0, 0, i, 6]) * h)
+
+        x1 = max(0, min(w - 1, x1))
+        y1 = max(0, min(h - 1, y1))
+        x2 = max(0, min(w, x2))
+        y2 = max(0, min(h, y2))
+        if x2 <= x1 or y2 <= y1:
+            continue
+
+        results.append(
+            {
+                "type": "object",
+                "label": COCO_ID_TO_LABEL.get(class_id, "unknown"),
+                "box": (x1, y1, x2, y2),
+                "confidence": confidence,
+            }
+        )
+
+    return results
+
+
+def _detect_objects_legacy(net: cv2.dnn_Net, frame: Any, conf_threshold: float, nms_threshold: float) -> List[Dict[str, Any]]:
+    blob = cv2.dnn.blobFromImage(
+        frame,
+        scalefactor=1.0 / 127.5,
+        size=(320, 320),
+        mean=(127.5, 127.5, 127.5),
+        swapRB=True,
+        crop=False,
+    )
+
+    net.setInput(blob)
+    try:
+        output = net.forward()
+    except cv2.error:
+        global _using_cuda
+        if _using_cuda:
+            net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+            net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+            _using_cuda = False
+            net.setInput(blob)
+            output = net.forward()
+        else:
+            raise
+
+    decoded = _decode_tf_detections(output, frame.shape, conf_threshold)
+    return _suppress_nested_boxes(decoded, iou_thr=max(0.35, nms_threshold), contain_thr=0.8)
+
+
 def detect_objects(frame, conf_threshold: float, nms_threshold: float) -> List[Dict[str, Any]]:
     net = _load_model()
     if net is None:
         return []
+
+    if not hasattr(cv2, "dnn_DetectionModel"):
+        return _detect_objects_legacy(net, frame, conf_threshold, nms_threshold)
 
     model = cv2.dnn_DetectionModel(net)
     model.setInputParams(size=(320, 320), scale=1.0 / 127.5, mean=(127.5, 127.5, 127.5), swapRB=True)
