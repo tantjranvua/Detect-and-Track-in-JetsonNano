@@ -34,6 +34,8 @@ ALLOWED_CLASS_IDS: Set[int] = {47, 77}  # cup, cell phone
 _net: Optional[cv2.dnn_Net] = None
 _warned_missing_model = False
 _using_cuda = False
+_object_detection_disabled = False
+_warned_incompatible_model = False
 
 
 def _iou(box_a: tuple, box_b: tuple) -> float:
@@ -160,6 +162,10 @@ def _load_model() -> Optional[cv2.dnn_Net]:
     global _net
     global _warned_missing_model
     global _using_cuda
+    global _object_detection_disabled
+
+    if _object_detection_disabled:
+        return None
 
     if _net is not None:
         return _net
@@ -193,6 +199,27 @@ def _load_model() -> Optional[cv2.dnn_Net]:
 
     _net = net
     return _net
+
+
+def _is_unsupported_model_error(ex: cv2.error) -> bool:
+    message = str(ex)
+    return (
+        "Can't create layer" in message
+        or "FusedBatchNormV3" in message
+        or "getLayerInstance" in message
+    )
+
+
+def _disable_object_detector_once(reason: str) -> None:
+    global _object_detection_disabled
+    global _warned_incompatible_model
+    if not _warned_incompatible_model:
+        print(
+            "[WARN] Object detector bi vo hieu hoa vi model khong tuong thich voi OpenCV hien tai. "
+            f"Chi tiet: {reason}"
+        )
+        _warned_incompatible_model = True
+    _object_detection_disabled = True
 
 
 def _decode_tf_detections(output: Any, frame_shape: Tuple[int, int, int], conf_threshold: float) -> List[Dict[str, Any]]:
@@ -253,15 +280,24 @@ def _detect_objects_legacy(net: cv2.dnn_Net, frame: Any, conf_threshold: float, 
     net.setInput(blob)
     try:
         output = net.forward()
-    except cv2.error:
+    except cv2.error as first_error:
         global _using_cuda
         if _using_cuda:
             net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
             net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
             _using_cuda = False
             net.setInput(blob)
-            output = net.forward()
+            try:
+                output = net.forward()
+            except cv2.error as second_error:
+                if _is_unsupported_model_error(second_error):
+                    _disable_object_detector_once(str(second_error).splitlines()[0])
+                    return []
+                raise
         else:
+            if _is_unsupported_model_error(first_error):
+                _disable_object_detector_once(str(first_error).splitlines()[0])
+                return []
             raise
 
     decoded = _decode_tf_detections(output, frame.shape, conf_threshold)
@@ -281,14 +317,23 @@ def detect_objects(frame, conf_threshold: float, nms_threshold: float) -> List[D
 
     try:
         class_ids, confidences, boxes = model.detect(frame, confThreshold=conf_threshold, nmsThreshold=nms_threshold)
-    except cv2.error:
+    except cv2.error as first_error:
         global _using_cuda
         if _using_cuda:
             net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
             net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
             _using_cuda = False
-            class_ids, confidences, boxes = model.detect(frame, confThreshold=conf_threshold, nmsThreshold=nms_threshold)
+            try:
+                class_ids, confidences, boxes = model.detect(frame, confThreshold=conf_threshold, nmsThreshold=nms_threshold)
+            except cv2.error as second_error:
+                if _is_unsupported_model_error(second_error):
+                    _disable_object_detector_once(str(second_error).splitlines()[0])
+                    return []
+                raise
         else:
+            if _is_unsupported_model_error(first_error):
+                _disable_object_detector_once(str(first_error).splitlines()[0])
+                return []
             raise
 
     if class_ids is None or len(class_ids) == 0:
