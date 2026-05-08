@@ -175,11 +175,18 @@ def _load_model() -> Optional[cv2.dnn_Net]:
 
     net = cv2.dnn.readNetFromTensorflow(str(MODEL_PATH), str(CONFIG_PATH))
 
-    try:
-        net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
-        net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
-        _using_cuda = True
-    except cv2.error:
+    cuda_backend = getattr(cv2.dnn, "DNN_BACKEND_CUDA", None)
+    cuda_target = getattr(cv2.dnn, "DNN_TARGET_CUDA", None)
+    if cuda_backend is not None and cuda_target is not None:
+        try:
+            net.setPreferableBackend(cuda_backend)
+            net.setPreferableTarget(cuda_target)
+            _using_cuda = True
+        except cv2.error:
+            net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+            net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+            _using_cuda = False
+    else:
         net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
         net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
         _using_cuda = False

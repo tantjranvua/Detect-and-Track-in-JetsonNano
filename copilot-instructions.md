@@ -21,6 +21,7 @@
 - Bổ sung khả năng chay tren Jetson Nano: them script khoi dong Linux va ho tro camera CSI qua GStreamer.
 - Bo sung camera profile (usb_webcam/csi_camera) de chuyen doi nhanh bang 1 dong active_camera_profile.
 - Chuan hoa quy trinh Jetson Nano voi moi truong ao mac dinh P36 va bo requirements rieng cho Jetson.
+- Tuong thich OpenCV tren Jetson khi khong co DNN_BACKEND_CUDA/DNN_TARGET_CUDA: tu dong fallback CPU, tranh crash luc khoi tao model.
 - Bổ sung giai đoạn face-recognize theo hướng on-device, không phụ thuộc dịch vụ cloud.
 - Face-recognize ưu tiên cơ chế gallery cục bộ (ảnh mẫu theo từng người), cho phép nhận diện "unknown" khi dưới ngưỡng.
 - Cần có công cụ thu thập ảnh gallery trực tiếp từ camera để tạo dữ liệu mẫu nhanh trong thực địa.
