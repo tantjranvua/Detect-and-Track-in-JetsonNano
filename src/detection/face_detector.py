@@ -12,6 +12,7 @@ CONFIG_PATH = MODEL_DIR / "deploy.prototxt.txt"
 _net: Optional[cv2.dnn_Net] = None
 _warned_missing_model = False
 _using_cuda = False
+_trt_face_session = None  # Được khởi tạo bởi configure_face_detector()
 
 
 def _iou_xywh(box_a: List[int], box_b: List[int]) -> float:
@@ -70,6 +71,85 @@ def _safe_nms_indices(
         return _nms_fallback_indices(raw_boxes, raw_scores, nms_iou_threshold)
 
 
+# ---------------------------------------------------------------------------
+# TensorRT inference (chỉ hoạt động khi tensorrt + pycuda được cài trên Jetson)
+# ---------------------------------------------------------------------------
+
+class _TRTFaceSession:
+    """Wrapper TensorRT cho ResNet-10 SSD face detector.
+
+    Chỉ dùng trên Jetson Nano sau khi đã chạy scripts/convert_to_trt.sh.
+    Tương thích TensorRT 7.x (JetPack 4.4) và 8.x (JetPack 4.6).
+    """
+
+    def __init__(self, engine_path: str) -> None:
+        import tensorrt as trt  # type: ignore
+        import pycuda.driver as cuda  # type: ignore
+        import pycuda.autoinit  # noqa: F401  # type: ignore
+
+        self._cuda = cuda
+        self._trt = trt
+        logger = trt.Logger(trt.Logger.WARNING)
+        with open(engine_path, "rb") as f:
+            engine = trt.Runtime(logger).deserialize_cuda_engine(f.read())
+        self._context = engine.create_execution_context()
+
+        self._h_inputs: list = []
+        self._h_outputs: list = []
+        self._d_buffers: list = []
+
+        for i in range(engine.num_bindings):
+            shape = engine.get_binding_shape(i)
+            dtype = trt.nptype(engine.get_binding_dtype(i))
+            size = max(1, abs(int(trt.volume(shape))))
+            h_buf = cuda.pagelocked_empty(size, dtype)
+            d_buf = cuda.mem_alloc(h_buf.nbytes)
+            self._d_buffers.append(int(d_buf))
+            entry = {"host": h_buf, "device": d_buf, "shape": shape}
+            if engine.binding_is_input(i):
+                self._h_inputs.append(entry)
+            else:
+                self._h_outputs.append(entry)
+
+    def run(self, blob: np.ndarray) -> np.ndarray:
+        """Chạy inference và trả về numpy array (1, 1, N, 7)."""
+        cuda = self._cuda
+        h_in = self._h_inputs[0]["host"]
+        d_in = self._h_inputs[0]["device"]
+        np.copyto(h_in, blob.ravel().astype(h_in.dtype))
+        cuda.memcpy_htod(d_in, h_in)
+        self._context.execute_v2(bindings=self._d_buffers)
+        h_out = self._h_outputs[0]["host"]
+        d_out = self._h_outputs[0]["device"]
+        cuda.memcpy_dtoh(h_out, d_out)
+        return np.array(h_out).reshape(self._h_outputs[0]["shape"])
+
+
+def configure_face_detector(detection_cfg: dict) -> None:
+    """Khởi tạo TRT engine nếu use_tensorrt=true và file .engine tồn tại.
+
+    Gọi một lần trong main() ngay sau load_config().
+    Nếu TRT không khả dụng hoặc engine không tìm thấy, tự động fallback về cv2.dnn.
+    """
+    global _trt_face_session
+    if not detection_cfg.get("use_tensorrt", False):
+        return
+
+    engine_path = Path(__file__).resolve().parents[2] / detection_cfg.get(
+        "face_engine_path", "models/face_detector.engine"
+    )
+    if not engine_path.exists():
+        print(f"[WARN] TRT face engine khong tim thay: {engine_path}. Dung lai cv2.dnn.")
+        return
+
+    try:
+        _trt_face_session = _TRTFaceSession(str(engine_path))
+        print(f"[INFO] TRT face detector da tai: {engine_path}")
+    except Exception as exc:
+        print(f"[WARN] Khong the khoi tao TRT face detector: {exc}. Dung lai cv2.dnn.")
+        _trt_face_session = None
+
+
 def _load_model() -> Optional[cv2.dnn_Net]:
     global _net
     global _warned_missing_model
@@ -112,7 +192,52 @@ def detect_faces(frame, conf_threshold: float, nms_iou_threshold: float = 0.35) 
     """
     Hàm thực hiện nhận diện khuôn mặt từ frame hình ảnh.
     Trả về danh sách các dict chứa tọa độ box và độ tin cậy.
+    Ưu tiên TRT nếu đã configure, ngược lại dùng cv2.dnn.
     """
+    # --- TRT path ---
+    if _trt_face_session is not None:
+        h, w = frame.shape[:2]
+        blob = cv2.dnn.blobFromImage(
+            cv2.resize(frame, (300, 300)), 1.0, (300, 300), (104.0, 177.0, 123.0)
+        )
+        try:
+            output = _trt_face_session.run(blob)
+        except Exception as exc:
+            print(f"[WARN] TRT face inference loi: {exc}. Dung lai cv2.dnn.")
+            # Fall through to cv2.dnn path below
+        else:
+            # Output: (1, 1, N, 7) same layout as Caffe net.forward()
+            if output.ndim == 1:
+                n = len(output) // 7
+                output = output.reshape(1, 1, n, 7)
+            raw_boxes: List[List[int]] = []
+            raw_scores: List[float] = []
+            for i in range(output.shape[2]):
+                confidence = float(output[0, 0, i, 2])
+                if confidence > conf_threshold:
+                    box = output[0, 0, i, 3:7] * np.array([w, h, w, h])
+                    startX, startY, endX, endY = box.astype("int")
+                    startX = max(0, min(w - 1, startX))
+                    startY = max(0, min(h - 1, startY))
+                    endX = max(0, min(w, endX))
+                    endY = max(0, min(h, endY))
+                    bw = endX - startX
+                    bh = endY - startY
+                    if bw <= 0 or bh <= 0:
+                        continue
+                    raw_boxes.append([startX, startY, bw, bh])
+                    raw_scores.append(confidence)
+            results: List[Dict[str, Any]] = []
+            if raw_boxes:
+                for idx in _safe_nms_indices(raw_boxes, raw_scores, conf_threshold, nms_iou_threshold):
+                    x, y, bw, bh = raw_boxes[int(idx)]
+                    results.append({
+                        "box": (x, y, x + bw, y + bh),
+                        "confidence": float(raw_scores[int(idx)]),
+                    })
+            return results
+
+    # --- cv2.dnn path (CPU / OpenCV CUDA) ---
     net = _load_model()
     if net is None:
         return []

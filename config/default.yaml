@@ -24,6 +24,12 @@ runtime:
   display: true
 
 detection:
+  # TensorRT: đặt use_tensorrt=true trên Jetson sau khi đã chạy scripts/convert_to_trt.sh
+  # File .engine chỉ tồn tại trên Jetson, KHÔNG commit vào git.
+  use_tensorrt: false
+  face_engine_path: "models/face_detector.engine"
+  object_engine_path: "models/object_detector.engine"
+
   face_conf_threshold: 0.6
   face_nms_iou_threshold: 0.35
   face_recognize:

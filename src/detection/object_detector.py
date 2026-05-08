@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import cv2
+import numpy as np
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MODEL_DIR = PROJECT_ROOT / "models" / "object detector model"
@@ -36,6 +37,7 @@ _warned_missing_model = False
 _using_cuda = False
 _object_detection_disabled = False
 _warned_incompatible_model = False
+_trt_obj_session = None  # Được khởi tạo bởi configure_object_detector()
 
 
 def _iou(box_a: tuple, box_b: tuple) -> float:
@@ -222,6 +224,140 @@ def _disable_object_detector_once(reason: str) -> None:
     _object_detection_disabled = True
 
 
+# ---------------------------------------------------------------------------
+# TensorRT inference cho object detector
+# ---------------------------------------------------------------------------
+
+class _TRTObjectSession:
+    """Wrapper TensorRT cho SSD MobileNet V2 COCO (tf2onnx → trtexec).
+
+    Chỉ dùng trên Jetson Nano sau khi đã chạy scripts/convert_to_trt.sh.
+    Output format (tf2onnx standard SSD):
+      binding 0: num_detections  (1,)
+      binding 1: detection_boxes (1, N, 4)  [y1,x1,y2,x2] normalized
+      binding 2: detection_scores (1, N)
+      binding 3: detection_classes (1, N)  1-indexed COCO
+    """
+
+    def __init__(self, engine_path: str) -> None:
+        import tensorrt as trt  # type: ignore
+        import pycuda.driver as cuda  # type: ignore
+        import pycuda.autoinit  # noqa: F401  # type: ignore
+
+        self._cuda = cuda
+        self._trt = trt
+        logger = trt.Logger(trt.Logger.WARNING)
+        with open(engine_path, "rb") as f:
+            engine = trt.Runtime(logger).deserialize_cuda_engine(f.read())
+        self._context = engine.create_execution_context()
+
+        self._h_inputs: list = []
+        self._h_outputs: list = []
+        self._d_buffers: list = []
+
+        for i in range(engine.num_bindings):
+            shape = engine.get_binding_shape(i)
+            dtype = trt.nptype(engine.get_binding_dtype(i))
+            size = max(1, abs(int(trt.volume(shape))))
+            h_buf = cuda.pagelocked_empty(size, dtype)
+            d_buf = cuda.mem_alloc(h_buf.nbytes)
+            self._d_buffers.append(int(d_buf))
+            entry = {"host": h_buf, "device": d_buf, "shape": shape}
+            if engine.binding_is_input(i):
+                self._h_inputs.append(entry)
+            else:
+                self._h_outputs.append(entry)
+
+    def run(self, blob: np.ndarray) -> list:
+        """Chạy inference, trả về list numpy array theo thứ tự output binding."""
+        cuda = self._cuda
+        h_in = self._h_inputs[0]["host"]
+        d_in = self._h_inputs[0]["device"]
+        np.copyto(h_in, blob.ravel().astype(h_in.dtype))
+        cuda.memcpy_htod(d_in, h_in)
+        self._context.execute_v2(bindings=self._d_buffers)
+        results = []
+        for out in self._h_outputs:
+            cuda.memcpy_dtoh(out["host"], out["device"])
+            results.append(np.array(out["host"]).reshape(out["shape"]))
+        return results
+
+
+def _decode_trt_obj_outputs(
+    outputs: list,
+    frame_h: int,
+    frame_w: int,
+    conf_threshold: float,
+) -> List[Dict[str, Any]]:
+    """Decode 4 output bindings của SSD MobileNet V2 (tf2onnx standard format).
+
+    outputs[0]: num_detections (1,)
+    outputs[1]: detection_boxes (1, N, 4) as [y1, x1, y2, x2] normalized
+    outputs[2]: detection_scores (1, N)
+    outputs[3]: detection_classes (1, N) 1-indexed COCO
+    """
+    if len(outputs) < 4:
+        return []
+
+    num_det = int(outputs[0].ravel()[0])
+    boxes = outputs[1].reshape(-1, 4)
+    scores = outputs[2].ravel()
+    classes = outputs[3].ravel()
+
+    results: List[Dict[str, Any]] = []
+    for i in range(min(num_det, len(scores))):
+        conf = float(scores[i])
+        if conf < conf_threshold:
+            continue
+        class_id = int(classes[i])
+        if class_id not in ALLOWED_CLASS_IDS:
+            continue
+
+        y1_n, x1_n, y2_n, x2_n = boxes[i]
+        x1 = max(0, int(x1_n * frame_w))
+        y1 = max(0, int(y1_n * frame_h))
+        x2 = min(frame_w, int(x2_n * frame_w))
+        y2 = min(frame_h, int(y2_n * frame_h))
+        if x2 <= x1 or y2 <= y1:
+            continue
+
+        results.append({
+            "type": "object",
+            "label": COCO_ID_TO_LABEL.get(class_id, "unknown"),
+            "box": (x1, y1, x2, y2),
+            "confidence": conf,
+        })
+
+    return _suppress_nested_boxes(results, iou_thr=0.45, contain_thr=0.8)
+
+
+def configure_object_detector(detection_cfg: dict) -> None:
+    """Khởi tạo TRT engine cho object detector nếu use_tensorrt=true và file .engine tồn tại.
+
+    Gọi một lần trong main() ngay sau load_config().
+    Khi TRT được bật, object detector sẽ hoạt động trở lại (dùng model đã convert),
+    bỏ qua TF frozen graph không tương thích với OpenCV 4.1.1.
+    """
+    global _trt_obj_session, _object_detection_disabled
+    if not detection_cfg.get("use_tensorrt", False):
+        return
+
+    engine_path = Path(__file__).resolve().parents[2] / detection_cfg.get(
+        "object_engine_path", "models/object_detector.engine"
+    )
+    if not engine_path.exists():
+        print(f"[WARN] TRT object engine khong tim thay: {engine_path}. Object detector van bi tat.")
+        return
+
+    try:
+        _trt_obj_session = _TRTObjectSession(str(engine_path))
+        _object_detection_disabled = False  # Kích hoạt lại object detection qua TRT
+        print(f"[INFO] TRT object detector da tai: {engine_path}")
+    except Exception as exc:
+        print(f"[WARN] Khong the khoi tao TRT object detector: {exc}. Object detector van bi tat.")
+        _trt_obj_session = None
+
+
 def _decode_tf_detections(output: Any, frame_shape: Tuple[int, int, int], conf_threshold: float) -> List[Dict[str, Any]]:
     h, w = frame_shape[:2]
     results: List[Dict[str, Any]] = []
@@ -305,6 +441,25 @@ def _detect_objects_legacy(net: cv2.dnn_Net, frame: Any, conf_threshold: float, 
 
 
 def detect_objects(frame, conf_threshold: float, nms_threshold: float) -> List[Dict[str, Any]]:
+    # --- TRT path ---
+    if _trt_obj_session is not None:
+        h, w = frame.shape[:2]
+        blob = cv2.dnn.blobFromImage(
+            frame,
+            scalefactor=1.0 / 127.5,
+            size=(320, 320),
+            mean=(127.5, 127.5, 127.5),
+            swapRB=True,
+            crop=False,
+        )
+        try:
+            outputs = _trt_obj_session.run(blob)
+        except Exception as exc:
+            print(f"[WARN] TRT object inference loi: {exc}. Dung lai cv2.dnn.")
+        else:
+            return _decode_trt_obj_outputs(outputs, h, w, conf_threshold)
+
+    # --- cv2.dnn path (CPU / OpenCV CUDA) ---
     net = _load_model()
     if net is None:
         return []

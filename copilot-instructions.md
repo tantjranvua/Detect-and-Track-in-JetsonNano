@@ -27,6 +27,10 @@
 - Bổ sung giai đoạn face-recognize theo hướng on-device, không phụ thuộc dịch vụ cloud.
 - Face-recognize ưu tiên cơ chế gallery cục bộ (ảnh mẫu theo từng người), cho phép nhận diện "unknown" khi dưới ngưỡng.
 - Cần có công cụ thu thập ảnh gallery trực tiếp từ camera để tạo dữ liệu mẫu nhanh trong thực địa.
+- Hỗ trợ TensorRT inference cho face detector và object detector: khi use_tensorrt=true và file .engine tồn tại thì dùng TRT, ngược lại fallback về cv2.dnn không crash.
+- File .engine là device-specific (chỉ tạo trên Jetson Nano, không commit git). File .onnx có thể commit.
+- configure_face_detector(detection_cfg) và configure_object_detector(detection_cfg) phải được gọi trong main() ngay sau load_config().
+- Object detector TRT dùng model SSD MobileNet V2 COCO chuyển đổi qua tf2onnx → trtexec, thay thế TF frozen graph không tương thích với OpenCV 4.1.1.
 
 ## Quy ước tài liệu
 - Tất cả tài liệu hiện tại và tài liệu tạo mới phải viết bằng tiếng Việt có dấu.

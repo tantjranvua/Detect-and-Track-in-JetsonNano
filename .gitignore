@@ -1,0 +1,30 @@
+# TensorRT engine files — device-specific, không commit
+models/*.engine
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+P36/
+venv/
+.venv/
+env/
+
+# Logs
+logs/*.log
+logs/*.jsonl
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/

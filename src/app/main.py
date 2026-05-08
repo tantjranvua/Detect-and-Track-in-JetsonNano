@@ -7,9 +7,9 @@ import cv2
 import yaml
 
 from src.control.pid import PID
-from src.detection.face_detector import detect_faces
+from src.detection.face_detector import detect_faces, configure_face_detector
 from src.detection.face_recognizer import build_face_recognizer
-from src.detection.object_detector import detect_objects
+from src.detection.object_detector import detect_objects, configure_object_detector
 from src.hardware.servo_controller import ServoController
 from src.input.camera import open_camera, resolve_camera_runtime
 from src.tracking.tracker import TargetTracker
@@ -66,6 +66,12 @@ def pick_control_target(
 def main() -> None:
     cfg = load_config()
     logger = get_logger()
+
+    # Khởi tạo TensorRT engine nếu use_tensorrt=true trong config (chỉ có tác dụng trên Jetson).
+    detection_cfg = cfg.get("detection", {})
+    configure_face_detector(detection_cfg)
+    configure_object_detector(detection_cfg)
+
     face_recognizer = build_face_recognizer(cfg)
     tracking_cfg = cfg.get("tracking", {})
     face_tracker = TargetTracker(
