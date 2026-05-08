@@ -1,0 +1,5 @@
+# Dependencies danh cho Jetson Nano (uu tien OpenCV he thong tu JetPack)
+# Khong cai opencv-python bang pip de tranh xung dot ARM/CUDA.
+numpy==1.19.5
+PyYAML==6.0.1
+psutil==5.9.5

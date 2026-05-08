@@ -184,10 +184,41 @@ Diễn giải nhanh:
 scripts\run_day1.cmd
 ```
 
+### Chạy trên Jetson Nano (chuẩn hóa với môi trường `P36`)
+Checklist khuyến nghị:
+1. Đồng bộ code từ Windows sang Jetson (git clone hoặc git pull).
+2. Cài gói hệ thống cần thiết trên Jetson:
+
+```bash
+sudo apt update
+sudo apt install -y python3-venv python3-pip python3-opencv
+```
+
+3. Chọn profile camera trong `config/default.yaml`:
+	- USB webcam: `runtime.active_camera_profile: usb_webcam`
+	- CSI camera: `runtime.active_camera_profile: csi_camera`
+4. Chạy script Linux:
+
+```bash
+chmod +x scripts/run_day1.sh
+./scripts/run_day1.sh
+```
+
+Ghi chú:
+1. Script sẽ tự tạo môi trường ảo tên `P36` (có thể đổi bằng biến `VENV_DIR`).
+2. Script dùng `requirements-jetson.txt` và giữ OpenCV hệ thống từ JetPack.
+3. Nếu muốn dùng tên môi trường khác: `VENV_DIR=myenv ./scripts/run_day1.sh`.
+
 ### Thu gallery
 
 ```bat
 scripts\capture_gallery.cmd Tan 30
+```
+
+Trên Jetson Nano:
+
+```bash
+P36/bin/python -m src.app.capture_gallery --person Tan --count 30
 ```
 
 ## 13. Giới hạn hiện tại và roadmap ngắn
